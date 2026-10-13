@@ -1,21 +1,22 @@
-# RESOLVE — Quick Setup (Docker + Claude)
+# RESOLVE — Testing setup
 
-Build a container with RESOLVE, grab cJSON as a test target, log in to Claude, and
-list the available RESOLVE commands. Works the same in a GitHub Codespace or on local Docker.
-
----
-
-## 0. Prerequisites
-
-- Docker available (built into Codespaces; locally, Docker Desktop).
-- The `Dockerfile` from this repo.
-- A Claude Pro/Max account (for subscription login) or an Anthropic API key.
+Build a container with RESOLVE for testing
 
 ---
 
-## 1. Build the image (Claude backend)
+## 0. Environment
 
-From the repo root (where the `Dockerfile` lives):
+1. On the main repo page, click `Code` next to `Add file`
+2. Click `Codespaces` then "Create codespace on main"
+
+You can run the following commands in that terminal
+
+---
+
+## 1. Build the image
+
+This command uses Claude but it can use others
+From the repo root (where this `Dockerfile` lives, not the dev one):
 
 ```bash
 docker build --build-arg AI_BACKEND=claude -t resolve:claude .
@@ -26,8 +27,9 @@ docker build --build-arg AI_BACKEND=claude -t resolve:claude .
 
 ---
 
-## 2. Grab cJSON (test target)
+## 2. Grab cJSON (optional)
 
+This is a small open source repo that I found that you can test resolve on. You don't have to use this one specifically.
 Clone it into your current folder so the container can see it:
 
 ```bash
@@ -40,19 +42,11 @@ You should now have a `cJSON/` folder next to the Dockerfile.
 
 ## 3. Run the container
 
-`-v "${PWD}:/work"` mounts your current folder into the container at `/work` (edits sync both ways).
-The `claude-auth` volume persists your Claude login across runs.
-
 ```bash
 docker run -it -v claude-auth:/root/.claude -v "${PWD}:/work" -w /work resolve:claude bash
 ```
 
-- **PowerShell:** `-v "${PWD}:/work"` (same).
-- **cmd.exe:** `-v "%cd%:/work"`.
-
-You'll land at a `root@...:/work#` prompt. `ls` should show `cJSON/`.
-
-> Using a subscription? Do **not** pass `-e ANTHROPIC_API_KEY=...` — an API key overrides the subscription login.
+You'll land at a `root@...:/work#` prompt. `ls` should show `cJSON/` if that's the repo you are using.
 
 ---
 
@@ -63,13 +57,10 @@ Inside the container:
 ```bash
 claude
 ```
-
-1. Choose **"Claude account with subscription"** (or use an API key — see note below).
+1. Choose **"Claude account with subscription"**
 2. Open the printed **URL** in your own laptop browser (Ctrl/Cmd-click or copy-paste the full URL).
 3. Approve, copy the **code** it shows, paste it back at the terminal prompt, Enter.
 4. Type `/exit` to leave the Claude session.
-
-> API key instead: skip this step and run the container with `-e ANTHROPIC_API_KEY=sk-ant-...`.
 
 ---
 
@@ -79,4 +70,4 @@ claude
 resolve help
 ```
 
-Use `resolve help <subcommand>` to see any one command's options.
+Now you can run resolve. 
