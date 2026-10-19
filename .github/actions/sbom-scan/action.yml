@@ -1,0 +1,125 @@
+name: SBOM Scan
+description: >
+  Run `resolve sbom` on an SPDX SBOM inside the RESOLVE runtime image
+  (setup/Dockerfile) and write vulnerabilities.json plus one file per CVE
+  for the input-synthesis stage.
+
+# Usage:
+#   - uses: ./.github/actions/sbom-scan
+#     id: sbom
+#     with:
+#       sbom-path: examples/sbom/example.spdx.json
+#       llm-provider: claude
+#       anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+#   - run: echo "${{ steps.sbom.outputs.cve-files }}"
+
+inputs:
+  sbom-path:
+    description: "SPDX SBOM path, relative to the workspace"
+    required: true
+  output-dir:
+    description: "Output directory, relative to the workspace"
+    default: "sbom-out"
+  llm-provider:
+    description: "none | claude | gemini | ollama | opencode (fills in affected file/function)"
+    default: "none"
+  anthropic-api-key:
+    description: "Required when llm-provider is claude"
+    default: ""
+  gemini-api-key:
+    description: "Required when llm-provider is gemini"
+    default: ""
+  min-score:
+    description: "Minimum CVSS v3 base score (empty = no minimum)"
+    default: ""
+  filter-rejected:
+    description: "Exclude CVEs rejected by NIST"
+    default: "true"
+  filter-disputed:
+    description: "Exclude disputed CVEs"
+    default: "false"
+  filter-deferred:
+    description: "Exclude CVEs deferred by NIST"
+    default: "false"
+  image:
+    description: "Prebuilt RESOLVE image to use; if empty, builds setup/Dockerfile (with the Claude CLI when llm-provider is claude)"
+    default: ""
+
+outputs:
+  vulnerabilities-path:
+    description: "Path to vulnerabilities.json, relative to the workspace"
+    value: ${{ steps.scan.outputs.vulnerabilities-path }}
+  cve-count:
+    description: "Number of distinct CVEs found"
+    value: ${{ steps.scan.outputs.cve-count }}
+  cve-files:
+    description: "JSON array of per-CVE files relative to output-dir, e.g. [\"cves/CVE-2026-34085.json\"]"
+    value: ${{ steps.scan.outputs.cve-files }}
+
+runs:
+  using: composite
+  steps:
+    - name: Build RESOLVE runtime image
+      id: image
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        LLM_PROVIDER: ${{ inputs.llm-provider }}
+      run: |
+        set -euo pipefail
+        if [ -z "$IMAGE" ]; then
+          repo_root=$(realpath "$GITHUB_ACTION_PATH/../../..")
+          # Only the claude provider needs a CLI in the image; gemini uses the
+          # google-genai package bundled with RESOLVE.
+          backend=none
+          [ "$LLM_PROVIDER" = "claude" ] && backend=claude
+          IMAGE="resolve-sbom:$backend"
+          docker build --build-arg AI_BACKEND="$backend" -t "$IMAGE" \
+            -f "$repo_root/setup/Dockerfile" "$repo_root/setup"
+        fi
+        echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+    - name: Run SBOM scan
+      id: scan
+      shell: bash
+      env:
+        IMAGE: ${{ steps.image.outputs.image }}
+        SBOM_PATH: ${{ inputs.sbom-path }}
+        OUTPUT_DIR: ${{ inputs.output-dir }}
+        LLM_PROVIDER: ${{ inputs.llm-provider }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
+        MIN_SCORE: ${{ inputs.min-score }}
+        FILTER_REJECTED: ${{ inputs.filter-rejected }}
+        FILTER_DISPUTED: ${{ inputs.filter-disputed }}
+        FILTER_DEFERRED: ${{ inputs.filter-deferred }}
+      run: |
+        set -euo pipefail
+        # Without a key the lookup still succeeds but every affected file/function
+        # comes back UNKNOWN, which is easy to miss in CI, so fail loudly instead.
+        if [ "$LLM_PROVIDER" = "claude" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
+          echo "::error::llm-provider is claude but no anthropic-api-key was given. Add an ANTHROPIC_API_KEY secret, or set llm-provider to none."
+          exit 1
+        fi
+        if [ "$LLM_PROVIDER" = "gemini" ] && [ -z "$GEMINI_API_KEY" ]; then
+          echo "::error::llm-provider is gemini but no gemini-api-key was given. Add a GEMINI_API_KEY secret, or set llm-provider to none."
+          exit 1
+        fi
+
+        repo_root=$(realpath "$GITHUB_ACTION_PATH/../../..")
+        # Created on the host so later steps can write next to the results.
+        mkdir -p "$OUTPUT_DIR"
+
+        # GITHUB_OUTPUT / GITHUB_STEP_SUMMARY are mounted so the script can set
+        # step outputs from inside the container. PYTHONPATH runs resolve-cli from
+        # this repo instead of the release pinned in the image.
+        docker run --rm \
+          -v "$GITHUB_WORKSPACE:/work" -w /work \
+          -v "$repo_root:/resolve:ro" \
+          -v "$GITHUB_OUTPUT:/gh/output" -e GITHUB_OUTPUT=/gh/output \
+          -v "$GITHUB_STEP_SUMMARY:/gh/summary" -e GITHUB_STEP_SUMMARY=/gh/summary \
+          -e PYTHONPATH=/resolve/resolve-cli/src \
+          -e SBOM_PATH -e OUTPUT_DIR -e LLM_PROVIDER -e ANTHROPIC_API_KEY -e GEMINI_API_KEY -e MIN_SCORE \
+          -e FILTER_REJECTED -e FILTER_DISPUTED -e FILTER_DEFERRED \
+          "$IMAGE" \
+          /opt/resolve/bin/python3 /resolve/.github/actions/sbom-scan/sbom_scan.py

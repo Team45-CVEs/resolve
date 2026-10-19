@@ -1,0 +1,180 @@
+name: Analyze Codebase
+
+# Audits a target repository with a coding agent inside the RESOLVE runtime
+# image (setup/Dockerfile) and publishes a vulnerabilities.json, plus one
+# single-entry CVE file per finding, for the input-synthesis workflow.
+#
+# Downstream use (from another workflow):
+#   jobs:
+#     analyze:
+#       uses: ./.github/workflows/analyze-codebase.yml
+#       with: { target_repository: DaveGamble/cJSON }
+#       secrets: inherit
+#     synthesize:
+#       needs: analyze
+#       if: needs.analyze.outputs.vulnerability-count != '0'
+#       strategy:
+#         matrix:
+#           cve: ${{ fromJSON(needs.analyze.outputs.cve-files) }}
+#       steps:
+#         - uses: actions/download-artifact@v4
+#           with: { name: "${{ needs.analyze.outputs.artifact-name }}", path: analysis }
+#         - run: resolve input-synthesis run-all claude "analysis/${{ matrix.cve }}" out/
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_repository:
+        description: "owner/repo to analyze"
+        required: true
+        default: "DaveGamble/cJSON"
+      target_ref:
+        description: "Branch, tag, or SHA (default branch if empty)"
+        required: false
+        default: ""
+      agent:
+        description: "Coding agent backend"
+        type: choice
+        options: [claude, codex, opencode]
+        default: claude
+      model:
+        description: "Optional model override for the agent CLI"
+        required: false
+        default: ""
+      max_findings:
+        description: "Maximum vulnerabilities to emit"
+        required: false
+        default: "5"
+      focus:
+        description: "Optional hint narrowing the audit"
+        required: false
+        default: ""
+  workflow_call:
+    inputs:
+      target_repository:
+        type: string
+        required: true
+      target_ref:
+        type: string
+        default: ""
+      agent:
+        type: string
+        default: claude
+      model:
+        type: string
+        default: ""
+      max_findings:
+        type: string
+        default: "5"
+      focus:
+        type: string
+        default: ""
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: false
+      OPENAI_API_KEY:
+        required: false
+    outputs:
+      artifact-name:
+        description: "Name of the uploaded artifact holding vulnerabilities.json, report.md and cves/"
+        value: ${{ jobs.analyze.outputs.artifact-name }}
+      vulnerability-count:
+        description: "Number of vulnerabilities found"
+        value: ${{ jobs.analyze.outputs.vulnerability-count }}
+      cve-files:
+        description: "JSON array of per-CVE file paths relative to the artifact root, e.g. [\"cves/CVE-cJSON-00001.json\"]"
+        value: ${{ jobs.analyze.outputs.cve-files }}
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    outputs:
+      artifact-name: ${{ steps.summary.outputs.artifact-name }}
+      vulnerability-count: ${{ steps.summary.outputs.vulnerability-count }}
+      cve-files: ${{ steps.summary.outputs.cve-files }}
+    env:
+      AGENT: ${{ inputs.agent }}
+      MODEL: ${{ inputs.model }}
+      MAX_FINDINGS: ${{ inputs.max_findings }}
+      FOCUS: ${{ inputs.focus }}
+      TARGET_REPOSITORY: ${{ inputs.target_repository }}
+    steps:
+      - name: Checkout resolve
+        uses: actions/checkout@v5
+        with:
+          path: resolve
+
+      - name: Checkout target
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ inputs.target_repository }}
+          ref: ${{ inputs.target_ref }}
+          path: target
+
+      - name: Build RESOLVE runtime image
+        run: |
+          docker build \
+            --build-arg AI_BACKEND="$AGENT" \
+            -t "resolve:$AGENT" \
+            -f resolve/setup/Dockerfile resolve/setup
+
+      - name: Analyze codebase
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          extra=()
+          [ -n "$MODEL" ] && extra+=(--model "$MODEL")
+          [ -n "$FOCUS" ] && extra+=(--focus "$FOCUS")
+
+          # IS_SANDBOX=1 lets `claude --dangerously-skip-permissions` run as root
+          # in this throwaway container.
+          docker run --rm \
+            -e ANTHROPIC_API_KEY -e OPENAI_API_KEY -e IS_SANDBOX=1 \
+            -v "$GITHUB_WORKSPACE:/work" \
+            -w /work/target \
+            "resolve:$AGENT" \
+            /opt/resolve/bin/python3 /work/resolve/.github/parked/agent-codebase-analysis/analyze_codebase.py \
+              "$AGENT" \
+              --source /work/target \
+              --output /work/analysis \
+              --max-findings "$MAX_FINDINGS" \
+              "${extra[@]}"
+
+      - name: Summarize results
+        id: summary
+        run: |
+          set -euo pipefail
+          artifact="analysis-$(echo "$TARGET_REPOSITORY" | tr '/' '-')"
+          count=$(jq '.vulnerabilities | length' analysis/vulnerabilities.json)
+          cve_files=$(cd analysis && find cves -name '*.json' | sort | jq -R . | jq -sc .)
+
+          {
+            echo "artifact-name=$artifact"
+            echo "vulnerability-count=$count"
+            echo "cve-files=$cve_files"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Codebase analysis: \`$TARGET_REPOSITORY\`"
+            echo
+            echo "Found **$count** vulnerabilities (artifact \`$artifact\`)."
+            echo
+            echo "| CVE ID | CWE | Function | File |"
+            echo "|---|---|---|---|"
+            jq -r '.vulnerabilities[] | "| \(.["cve-id"]) | CWE-\(.["cwe-id"]) \(.["cwe-name"]) | `\(.["affected-function"])` | `\(.["affected-file"])` |"' \
+              analysis/vulnerabilities.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload analysis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.summary.outputs.artifact-name || 'analysis-failed' }}
+          path: analysis/
+          if-no-files-found: warn

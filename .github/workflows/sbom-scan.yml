@@ -1,0 +1,131 @@
+name: SBOM Scan
+
+# Runs the SBOM pipeline stage (.github/actions/sbom-scan) and uploads its
+# results for the input-synthesis stage.
+#
+# Configuration (Settings -> Secrets and variables -> Actions):
+#   secret   ANTHROPIC_API_KEY   used when the provider is claude
+#   secret   GEMINI_API_KEY      used when the provider is gemini
+#   variable SBOM_LLM_PROVIDER   default provider: claude | gemini | none
+#                                (falls back to claude if unset)
+#
+# Downstream use (from another workflow):
+#   jobs:
+#     sbom:
+#       uses: ./.github/workflows/sbom-scan.yml
+#       with: { sbom_path: examples/sbom/example.spdx.json }
+#       secrets: inherit
+#     synthesize:
+#       needs: sbom
+#       if: needs.sbom.outputs.cve-count != '0'
+#       strategy:
+#         matrix:
+#           cve: ${{ fromJSON(needs.sbom.outputs.cve-files) }}
+#       steps:
+#         - uses: actions/download-artifact@v4
+#           with: { name: "${{ needs.sbom.outputs.artifact-name }}", path: sbom }
+#         - run: resolve input-synthesis run-all claude "sbom/${{ matrix.cve }}" out/
+
+on:
+  workflow_dispatch:
+    inputs:
+      sbom_path:
+        description: "SPDX SBOM path, relative to this repo (or to target_repository if set)"
+        required: true
+        default: "examples/sbom/example.spdx.json"
+      target_repository:
+        description: "Optional owner/repo containing the SBOM (empty = this repo)"
+        required: false
+        default: ""
+      target_ref:
+        description: "Branch, tag, or SHA of target_repository (default branch if empty)"
+        required: false
+        default: ""
+      llm_provider:
+        description: "claude | gemini | none for affected file/function extraction (empty = SBOM_LLM_PROVIDER variable, else claude)"
+        required: false
+        default: ""
+      min_score:
+        description: "Minimum CVSS v3 base score (empty = no minimum)"
+        required: false
+        default: ""
+  workflow_call:
+    inputs:
+      sbom_path:
+        type: string
+        required: true
+      target_repository:
+        type: string
+        default: ""
+      target_ref:
+        type: string
+        default: ""
+      llm_provider:
+        type: string
+        default: ""
+      min_score:
+        type: string
+        default: ""
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: false
+      GEMINI_API_KEY:
+        required: false
+    outputs:
+      artifact-name:
+        description: "Name of the uploaded artifact holding vulnerabilities.json and cves/"
+        value: ${{ jobs.sbom.outputs.artifact-name }}
+      cve-count:
+        description: "Number of distinct CVEs found"
+        value: ${{ jobs.sbom.outputs.cve-count }}
+      cve-files:
+        description: "JSON array of per-CVE file paths relative to the artifact root"
+        value: ${{ jobs.sbom.outputs.cve-files }}
+
+permissions:
+  contents: read
+
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      artifact-name: ${{ steps.name.outputs.artifact-name }}
+      cve-count: ${{ steps.sbom.outputs.cve-count }}
+      cve-files: ${{ steps.sbom.outputs.cve-files }}
+    steps:
+      - name: Checkout resolve
+        uses: actions/checkout@v5
+
+      - name: Checkout target
+        if: inputs.target_repository != ''
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ inputs.target_repository }}
+          ref: ${{ inputs.target_ref }}
+          path: target
+
+      - name: Artifact name
+        id: name
+        env:
+          REPO: ${{ inputs.target_repository || github.repository }}
+        run: echo "artifact-name=sbom-${REPO//\//-}" >> "$GITHUB_OUTPUT"
+
+      - name: SBOM scan
+        id: sbom
+        uses: ./.github/actions/sbom-scan
+        with:
+          sbom-path: ${{ inputs.target_repository != '' && format('target/{0}', inputs.sbom_path) || inputs.sbom_path }}
+          output-dir: sbom-out
+          llm-provider: ${{ inputs.llm_provider || vars.SBOM_LLM_PROVIDER || 'claude' }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
+          min-score: ${{ inputs.min_score }}
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.name.outputs.artifact-name }}
+          path: sbom-out/
+          if-no-files-found: warn
