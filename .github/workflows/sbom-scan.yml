@@ -4,6 +4,8 @@ name: SBOM Scan
 # results for the input-synthesis stage.
 #
 # Configuration (Settings -> Secrets and variables -> Actions):
+#   variable SBOM_SCAN_ENABLED   must be "true" for the job to run; until then
+#                                every run (manual or called) is skipped
 #   secret   ANTHROPIC_API_KEY   used when the provider is claude
 #   secret   GEMINI_API_KEY      used when the provider is gemini
 #   variable SBOM_LLM_PROVIDER   default provider: claude | gemini | none
@@ -87,6 +89,8 @@ permissions:
 
 jobs:
   sbom:
+    # Off until an AI provider is configured; see SBOM_SCAN_ENABLED above.
+    if: vars.SBOM_SCAN_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     outputs:
