@@ -14,8 +14,8 @@ Standard library only, so it runs under the RESOLVE image's bundled
 Outputs (in OUTPUT_DIR):
   vulnerabilities.json     all findings from `resolve sbom`
   cves/<CVE-ID>.json       one document per CVE, input to input synthesis
-If GITHUB_OUTPUT / GITHUB_STEP_SUMMARY are set, also writes step outputs
-(vulnerabilities-path, cve-count, cve-files) and a results table.
+Also sets step outputs (vulnerabilities-path, cve-count, cve-files) and, if
+GITHUB_STEP_SUMMARY is set, writes a results table.
 """
 
 import json
@@ -24,24 +24,33 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Shared CI helpers (logger.py, env.py) live in CI-CD/scripts/container-scripts.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "CI-CD" / "scripts" / "container-scripts"))
+import env  # noqa: E402
+import logger  # noqa: E402
+
 # --- TEMPORARY CONFIG -------------------------------------------------------
 # Placeholder values until the rest of the pipeline's scripts and action.yml
-# files exist. Each one can be overridden by an environment variable of the
-# same name, which is how action.yml passes its inputs in.
+# files exist. Read with env.get_input: on GitHub from INPUT_<NAME> (which is
+# how action.yml passes its inputs in), locally from <NAME>.
 
 # SPDX SBOM to scan.
-SBOM_PATH = os.environ.get("SBOM_PATH", "examples/sbom/example.spdx.json")
+SBOM_PATH = env.get_input("SBOM_PATH", "examples/sbom/example.spdx.json")
 # Where vulnerabilities.json and cves/ are written.
-OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "sbom-out")
+OUTPUT_DIR = env.get_input("OUTPUT_DIR", "sbom-out")
 # LLM used to fill in affected-file/affected-function: none | claude | gemini | ollama | opencode.
-# claude reads ANTHROPIC_API_KEY, gemini reads GEMINI_API_KEY.
-LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "none")
+LLM_PROVIDER = env.get_input("LLM_PROVIDER", "none")
+# Key for LLM_PROVIDER. Handed to resolve as the variable that provider reads
+# (see PROVIDER_KEY_VARS); if empty, that variable is used as-is.
+API_KEY = env.get_input("API_KEY", "")
 # Minimum CVSS v3 base score; empty means no minimum.
-MIN_SCORE = os.environ.get("MIN_SCORE", "")
+MIN_SCORE = env.get_input("MIN_SCORE", "")
+# Only report these CVE IDs (space-separated); empty means all.
+CVE_IDS = env.get_input("CVE_IDS", "").split()
 # Which CVE statuses to drop.
-FILTER_REJECTED = os.environ.get("FILTER_REJECTED", "true") == "true"
-FILTER_DISPUTED = os.environ.get("FILTER_DISPUTED", "false") == "true"
-FILTER_DEFERRED = os.environ.get("FILTER_DEFERRED", "false") == "true"
+FILTER_REJECTED = env.get_input("FILTER_REJECTED", "true") == "true"
+FILTER_DISPUTED = env.get_input("FILTER_DISPUTED", "false") == "true"
+FILTER_DEFERRED = env.get_input("FILTER_DEFERRED", "false") == "true"
 # -----------------------------------------------------------------------------
 
 # Keys downstream stages (input synthesis, reach, remediate) rely on.
@@ -53,13 +62,41 @@ REQUIRED_KEYS = {
     "affected-file",
 }
 
+# Providers that need an API key, and the environment variable resolve reads it from.
+PROVIDER_KEY_VARS = {
+    "claude": "ANTHROPIC_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+}
+
+
+def provider_env() -> dict[str, str]:
+    """Environment for `resolve sbom`, with the provider's key set if it needs one."""
+    run_env = dict(os.environ)
+    key_var = PROVIDER_KEY_VARS.get(LLM_PROVIDER)
+    if key_var is None:
+        return run_env
+
+    key = API_KEY or run_env.get(key_var, "")
+    # Without a key the lookup still succeeds but every affected file/function
+    # comes back UNKNOWN, which is easy to miss in CI, so fail loudly instead.
+    if not key:
+        raise RuntimeError(
+            f"llm-provider is {LLM_PROVIDER} but no API key was given. "
+            f"Set the api-key input (or {key_var}), or set llm-provider to none."
+        )
+    run_env[key_var] = key
+    return run_env
+
 
 def run_sbom_lookup(sbom_path: Path, vulnerabilities_path: Path) -> None:
+    run_env = provider_env()
     command = ["resolve", "sbom", str(sbom_path), "-o", str(vulnerabilities_path)]
     if LLM_PROVIDER != "none":
         command += ["-L", LLM_PROVIDER]
     if MIN_SCORE:
         command += ["--min-score", MIN_SCORE]
+    if CVE_IDS:
+        command += ["--id", *CVE_IDS]
     if FILTER_REJECTED:
         command.append("--filter-rejected")
     if FILTER_DISPUTED:
@@ -67,8 +104,9 @@ def run_sbom_lookup(sbom_path: Path, vulnerabilities_path: Path) -> None:
     if FILTER_DEFERRED:
         command.append("--filter-deferred")
 
-    print("+ " + " ".join(command), flush=True)
-    subprocess.run(command, check=True)
+    with logger.group("resolve sbom"):
+        logger.info("+ " + " ".join(command))
+        subprocess.run(command, check=True, env=run_env)
 
 
 def load_vulnerabilities(vulnerabilities_path: Path) -> list[dict]:
@@ -98,17 +136,16 @@ def write_per_cve_files(vulnerabilities: list[dict], cves_dir: Path) -> list[Pat
     for cve_id, entries in sorted(by_cve.items()):
         path = cves_dir / f"{cve_id}.json"
         path.write_text(json.dumps({"vulnerabilities": entries}, indent=2) + "\n", encoding="utf-8")
+        logger.debug(f"Wrote {path} ({len(entries)} CWE entries)")
         paths.append(path)
     return paths
 
 
 def write_github_outputs(output_dir: Path, vulnerabilities: list[dict], cve_paths: list[Path]) -> None:
-    if github_output := os.environ.get("GITHUB_OUTPUT"):
-        cve_files = [str(p.relative_to(output_dir)) for p in cve_paths]
-        with open(github_output, "a", encoding="utf-8") as f:
-            f.write(f"vulnerabilities-path={output_dir / 'vulnerabilities.json'}\n")
-            f.write(f"cve-count={len(cve_paths)}\n")
-            f.write(f"cve-files={json.dumps(cve_files)}\n")
+    cve_files = [str(p.relative_to(output_dir)) for p in cve_paths]
+    env.set_output("vulnerabilities-path", output_dir / "vulnerabilities.json")
+    env.set_output("cve-count", len(cve_paths))
+    env.set_output("cve-files", json.dumps(cve_files))
 
     if step_summary := os.environ.get("GITHUB_STEP_SUMMARY"):
         lines = [
@@ -144,13 +181,13 @@ def main() -> int:
         cve_paths = write_per_cve_files(vulnerabilities, output_dir / "cves")
         write_github_outputs(output_dir, vulnerabilities, cve_paths)
     except subprocess.CalledProcessError as exc:
-        print(f"resolve sbom failed with exit code {exc.returncode}")
+        logger.error(f"resolve sbom failed with exit code {exc.returncode}", title="SBOM scan")
         return exc.returncode
     except RuntimeError as exc:
-        print(f"error: {exc}")
+        logger.error(str(exc), title="SBOM scan")
         return 1
 
-    print(f"Wrote {len(cve_paths)} CVE files to {output_dir / 'cves'}")
+    logger.notice(f"Found {len(cve_paths)} CVEs; wrote per-CVE files to {output_dir / 'cves'}", title="SBOM scan")
     return 0
 
 

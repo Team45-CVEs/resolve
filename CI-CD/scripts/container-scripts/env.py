@@ -85,7 +85,7 @@ def get_input(name, default=None):
     """Read an input. Same convention on every platform: INPUT_<NAME>. 
     GitHub sets these from the action's inputs; on GitLab, set them in the 
     job's variables, e.g. BUILD_PATH: dist.""" 
-    value = os.environ.get(f"{'INPUT_' if PLATFORM == "github" else ''}{name.upper()}", "").strip() 
+    value = os.environ.get(f"{'INPUT_' if PLATFORM == 'github' else ''}{name.upper()}", "").strip() 
     return value or default 
 
  

@@ -122,8 +122,8 @@ jobs:
           sbom-path: ${{ inputs.target_repository != '' && format('target/{0}', inputs.sbom_path) || inputs.sbom_path }}
           output-dir: sbom-out
           llm-provider: ${{ inputs.llm_provider || vars.SBOM_LLM_PROVIDER || 'claude' }}
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
+          # The secret matching the provider; the action ignores it for none.
+          api-key: ${{ secrets[(inputs.llm_provider || vars.SBOM_LLM_PROVIDER || 'claude') == 'gemini' && 'GEMINI_API_KEY' || 'ANTHROPIC_API_KEY'] }}
           min-score: ${{ inputs.min_score }}
 
       - name: Upload results
