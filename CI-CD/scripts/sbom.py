@@ -9,7 +9,7 @@ writes one vulnerabilities.json per CVE so the input-synthesis stage can take
 them one at a time.
 
 Standard library only, so it runs under the RESOLVE image's bundled
-/opt/resolve/bin/python3 (see action.yml) or any local Python 3.10+.
+/opt/resolve/bin/python3 (see CI-CD/actions/sbom/action.yml) or any local Python 3.10+.
 
 Outputs (in OUTPUT_DIR):
   vulnerabilities.json     all findings from `resolve sbom`
@@ -24,8 +24,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Shared CI helpers (logger.py, env.py) live in CI-CD/scripts/container-scripts.
-sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "CI-CD" / "scripts" / "container-scripts"))
+# Shared CI helpers (logger.py, env.py) live in container-scripts next to this file.
+sys.path.insert(0, str(Path(__file__).resolve().parent / "container-scripts"))
 import env  # noqa: E402
 import logger  # noqa: E402
 

@@ -4,8 +4,8 @@ description: >
   (setup/Dockerfile) and write vulnerabilities.json plus one file per CVE
   for the input-synthesis stage.
 
-# Usage:
-#   - uses: ./.github/actions/sbom-scan
+# Usage (from another repository; use ./CI-CD/actions/sbom inside this one):
+#   - uses: Team45-CVEs/resolve/CI-CD/actions/sbom@main
 #     id: sbom
 #     with:
 #       sbom-path: examples/sbom/example.spdx.json
@@ -115,4 +115,4 @@ runs:
           -e INPUT_FILTER_REJECTED -e INPUT_FILTER_DISPUTED -e INPUT_FILTER_DEFERRED \
           -e INPUT_API_KEY \
           "$IMAGE" \
-          /opt/resolve/bin/python3 /resolve/.github/actions/sbom-scan/sbom_scan.py
+          /opt/resolve/bin/python3 /resolve/CI-CD/scripts/sbom.py

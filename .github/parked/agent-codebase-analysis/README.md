@@ -13,5 +13,5 @@ To re-enable, move `analyze-codebase.yml` back into `.github/workflows/` and
 "Analyze codebase" step. It needs an `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`)
 repository secret.
 
-The active pipeline uses the SBOM lookup instead: see
-`.github/workflows/sbom-scan.yml`.
+The SBOM lookup is packaged as a reusable action instead: see
+`CI-CD/actions/sbom/action.yml`.
