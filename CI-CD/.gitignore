@@ -1,0 +1,12 @@
+# Local test environment (make setup)
+.venv/
+
+# Test output (make test)
+test-results/
+
+# Python and pytest caches
+__pycache__/
+.pytest_cache/
+
+# Keep the fixture projects' build output, even if a parent .gitignore ignores dist/
+!tests/fixtures/**/dist/
