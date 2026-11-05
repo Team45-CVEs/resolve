@@ -18,16 +18,14 @@ and test.set(NAME=value) changes a variable and reloads ci_env again.
 """
 
 from pathlib import Path
-
 import pytest
-
 import ci_env
 
 
 # Golden files the set_output() tests compare against.
 EXPECTED = Path(__file__).parent / "expected"
 EXPECTED_GITHUB_OUTPUT = EXPECTED / "github_output.txt"   # GITHUB_OUTPUT heredoc entries
-EXPECTED_GITLAB_OUTPUT = EXPECTED / "ci_outputs.env"      # GitLab dotenv lines
+EXPECTED_GITLAB_OUTPUT = EXPECTED / "gitlab_output.env"      # GitLab dotenv lines
 
 # The delimiter set_output() writes on GitHub when uuid4() is pinned to the
 # all-zero UUID by the fixed_uuid fixture in tests/conftest.py.

@@ -15,16 +15,7 @@ This folder holds the Python tests for the RESOLVE CI/CD platform: the core modu
 
 ## Quick start
 
-From the repo root:
-
-```sh
-cd CI-CD
-make setup      # once: creates .venv and installs pytest
-make unit       # run the tests on this machine, no Docker
-make test       # run them inside the image, the same way CI does
-```
-
-You need **Python 3.12 or newer** (see [Troubleshooting](#troubleshooting) for why), and Docker for `make test`.
+_To be added once the Docker test script is ready._
 
 ## How testing is organised
 
@@ -32,7 +23,7 @@ Every change is checked in stages, cheapest first:
 
 | Stage | What it checks | When |
 | --- | --- | --- |
-| Local runs | `make unit` while working, `make test` before pushing | Before every push |
+| Local runs | The same tests as CI, run in the test container on your machine | Before every push |
 | Static checks and contract tests | YAML, shell and Dockerfile linting; every `action.yml` matches its script | Every commit |
 | Unit tests in the image | Script and module logic, with the real tools installed | Pull requests and pushes to main |
 | Smoke test | The image started exactly as a runner starts it | Pull requests and pushes to main |
@@ -42,88 +33,7 @@ The tests in this folder are the unit tests. They run in an image built from the
 
 ## Running the tests
 
-### With make
-
-The `Makefile` is in `CI-CD/`. Run it from there (`make test`) or from the repo root (`make -C CI-CD test`).
-
-| Command | What it does |
-| --- | --- |
-| `make setup` | Creates `CI-CD/.venv` and installs the pinned packages from `tests/requirements.txt`. Run it once, and again whenever `requirements.txt` changes. |
-| `make unit` | Runs the tests on your machine with the `.venv` Python. Takes seconds, needs no Docker. |
-| `make test` | Builds the image from the repo-root `Dockerfile` and runs the tests inside it, the same steps as CI. `make tests` does the same. |
-| `make clean` | Removes `test-results/` and Python caches. Keeps `.venv`. |
-
-Pass extra pytest options with `PYTEST_ARGS`:
-
-```sh
-make unit PYTEST_ARGS="-k gitlab"
-make test PYTEST_ARGS="-x"
-```
-
-Other settings can be overridden the same way:
-
-| Setting | Default | Change it when |
-| --- | --- | --- |
-| `PYTHON` | `python3` | Your Python 3.12 has another name, e.g. `PYTHON=python3.12` or `PYTHON=py` on Windows |
-| `IMAGE` | `toolbox:local` | You want a different local tag |
-| `TARGET` | `runtime` | You want to test another Dockerfile stage |
-| `PIP_FLAGS` | empty | The image's Python was installed with `apt` (see [Troubleshooting](#troubleshooting)) |
-
-### With pytest directly
-
-After `make setup`, activate the virtual environment and **run pytest from inside `tests/`** (or any folder below it):
-
-```sh
-cd CI-CD
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-cd tests
-pytest
-```
-
-`tests/pytest.ini` tells pytest where the scripts are, and pytest only finds that file when it's run from `tests/` or below:
-
-```ini
-[pytest]
-minversion = 8.0          # fail clearly on an older pytest
-testpaths = .
-pythonpath = ../scripts   # lets tests import ci_env, logger and the action scripts
-```
-
-Running plain `pytest` from `CI-CD/` or the repo root fails with `module 'ci_env' has no attribute '_VARIABLES'`. If you must start elsewhere, give the path: `pytest CI-CD/tests`.
-
-Useful commands, all from `tests/`:
-
-| Command | What it does |
-| --- | --- |
-| `pytest` | Run every test |
-| `pytest ci_env` | Run one folder |
-| `pytest ci_env/test_ci_env.py::test_detects_github` | Run one test |
-| `pytest -k gitlab` | Run tests whose name contains `gitlab` |
-| `pytest -x` | Stop at the first failure |
-| `pytest --lf` | Rerun only the tests that failed last time |
-| `pytest -v` | List every test by name as it runs |
-
-Local runs don't use the real tools (cppcheck and others) unless you have them installed, so they don't replace `make test`.
-
-### What make test does
-
-`make test` builds the image, then starts a throwaway container from it:
-
-```sh
-docker build -f Dockerfile --target runtime -t toolbox:local .      # from the repo root
-docker run --rm --entrypoint sh \
-  -v "$PWD/CI-CD/tests:/action/tests:ro" \
-  -v "$PWD/CI-CD/test-results:/results" \
-  toolbox:local \
-  -c "python3 -m pip install --no-cache-dir -r /action/tests/requirements.txt \
-      && python3 -m pytest /action/tests -p no:cacheprovider --junitxml=/results/junit.xml"
-```
-
-This mounts `tests/` read-only, installs pytest into the container only (the image is never changed), and writes a JUnit report to `CI-CD/test-results/junit.xml`. Some details matter:
-
-- **The image must have the scripts at `/action/scripts`.** `pythonpath = ../scripts` is worked out from `/action/tests`, so the Dockerfile must copy `CI-CD/scripts/` to `/action/scripts/`. `make test` checks this first and stops with a clear error if they're missing.
-- `python3 -m pip` and `python3 -m pytest` make sure both use the same Python. `python3` works in both official Python images and `apt`-based ones, where plain `python` may not exist.
-- `-p no:cacheprovider` stops pytest trying to save its cache into the read-only `tests/` folder.
+_To be added once the Docker test script is ready._
 
 ## Folder layout
 
@@ -131,7 +41,6 @@ This mounts `tests/` read-only, installs pytest into the container only (the ima
 <repo root>/
 ├── Dockerfile                      # builds the image every action uses
 └── CI-CD/
-    ├── Makefile                    # make setup / unit / test / clean
     ├── .gitignore                  # .venv, test results, caches
     ├── scripts/                    # ci_env.py, logger.py, action*.py
     └── tests/
@@ -139,7 +48,6 @@ This mounts `tests/` read-only, installs pytest into the container only (the ima
         ├── pytest.ini              # where scripts are, minimum pytest version
         ├── conftest.py             # shared fixtures for every test
         ├── requirements.txt        # pytest and test helpers, pinned
-        ├── report.schema.json      # required structure of a report
         ├── test_contracts.py       # (planned) action.yml vs scripts
         ├── sample-projects/        # small fake C/C++ projects used as test input
         │   └── simple-build/
@@ -150,7 +58,7 @@ This mounts `tests/` read-only, installs pytest into the container only (the ima
         │   └── expected/
         │       ├── github_output.txt
         │       └── ci_outputs.env
-        ├── logger/                 # (planned)
+        ├── logger/                 
         │   ├── test_logger.py
         │   └── expected/
         │       └── annotations.txt
@@ -170,7 +78,6 @@ In this README, a **sample project** is a small fake C/C++ project in `sample-pr
 | --- | --- |
 | `sample-projects/` | Small fake C/C++ projects used as test input. `simple-build` is a one-file C project with a tiny `dist/` build. Tests copy one into a temporary workspace with the `sample_project` fixture, so they can change it freely. |
 | `<module>/expected/` | Golden files: the exact output one module or script should produce. When an output format changes on purpose, update its golden file in the same commit. |
-| `report.schema.json` | A JSON Schema of the fields every report must have. Tests validate reports against it, so a missing or misnamed field fails even when values differ. It starts with `metadata` (exactly what `ci_env.metadata()` returns) and an optional `findings` count; add each report's own fields as the scripts are written. Validating needs the `jsonschema` package; add it to `requirements.txt`, pinned, with the first test that uses it. |
 | `requirements.txt` | pytest and other test helpers, pinned to exact versions so results don't change when a new release comes out. |
 
 `CI-CD/.gitignore` keeps the sample projects' `dist/` folders in git even if the repo ignores `dist/` elsewhere.
@@ -383,7 +290,7 @@ def test_parses_findings(monkeypatch):
 
 This only works if the script calls `subprocess.run(...)`. A script that does `from subprocess import run` keeps its own copy, and the fake never reaches it.
 
-Tests that run the real tool on a sample project need the tool installed, so run them with `make test`.
+Tests that run the real tool on a sample project need the tool installed, so run them in the test container.
 
 ### Document every test
 
@@ -394,28 +301,22 @@ Give each test a docstring saying what it checks and why, as in `ci_env/test_ci_
 - **No test may depend on a secret.** Pull requests from forks can't access secrets, so those tests would fail for outside contributors.
 - **Shared setup goes in a `conftest.py` fixture**, not copied between test files.
 - **Scripts must give the same output for the same input**, or golden-file comparisons can't work. Anything random, such as the delimiter `set_output()` uses on GitHub, has to be pinned in the test. For `set_output()`, use the `fixed_uuid` fixture.
-- **Test dependencies are pinned** to exact versions in `requirements.txt`. To add one, add it there with its version, then run `make setup` again.
+- **Test dependencies are pinned** to exact versions in `requirements.txt`. To add one, add it there with its version.
 - **Read `ci_env` values through the module**, in tests and scripts alike.
 
 ## Troubleshooting
 
 **`AttributeError: module 'ci_env' has no attribute '_VARIABLES'`**
-pytest couldn't find `ci_env.py`. Because `tests/ci_env/` is a folder with the same name, Python imports that folder as an empty package instead, and the error doesn't mention the real cause. Check that you're running pytest from `tests/`, or use `make unit`.
-
-**`error: /action/scripts/ci_env.py is not in the image`**
-From `make test`: the Dockerfile doesn't copy the scripts to where the tests expect them. It needs `COPY CI-CD/scripts/ /action/scripts/` (or an equivalent).
+pytest couldn't find `ci_env.py`. Because `tests/ci_env/` is a folder with the same name, Python imports that folder as an empty package instead, and the error doesn't mention the real cause. Check that you're running pytest from `tests/`, and in the container, that the image has the scripts at `/action/scripts/`.
 
 **`SyntaxError` when importing `ci_env`**
 Your Python is older than 3.12. The `get_input()` line in `ci_env.py` reuses double quotes inside an f-string, which only 3.12 and newer accept. Use Python 3.12+, or change the inner quotes to single quotes and any Python 3 will work.
 
 **`error: externally-managed-environment` from pip**
-The Python was installed by the operating system (`apt`), which blocks system-wide installs. Locally, use `make setup`, which installs into `.venv` instead. In `make test`, run `make test PIP_FLAGS=--break-system-packages`; that's safe there because it only changes the throwaway container.
-
-**`No virtual environment yet. Run 'make setup' first.`**
-`make unit` needs the `.venv` that `make setup` creates.
+The Python was installed by the operating system (`apt`), which blocks system-wide installs. In the test container, add `--break-system-packages` to the `pip install`; that's safe there because it only changes the throwaway container.
 
 **`PytestCacheWarning: could not create cache path`**
-pytest is trying to save its cache into the read-only `tests/` mount. `make test` already passes `-p no:cacheprovider`; add it if you run the container by hand.
+pytest is trying to save its cache into the read-only `tests/` mount. Add `-p no:cacheprovider` to the pytest command in the container.
 
 **A test marked `xfail` in the results**
 `test_gitlab_input_does_not_collide_with_system_variables` documents a known bug: on GitLab and locally, `get_input("path")` returns the system `PATH`. It's expected to fail. Once `get_input()` is fixed it will start passing, and because it's marked `strict=True` the suite will then fail as a reminder to remove the marker.

@@ -1,6 +1,9 @@
 # Local test environment (make setup)
 .venv/
 
+# Local API keys and environment variables: copy .env.example to .env. Never commit .env.
+.env
+
 # Test output (make test)
 test-results/
 
