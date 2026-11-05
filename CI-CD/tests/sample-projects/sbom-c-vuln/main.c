@@ -1,4 +1,4 @@
-/* Test fixture: links cJSON 1.7.17, which has CVE-2024-31755
+/* Sample project: links cJSON 1.7.17, which has CVE-2024-31755
  * (NULL pointer dereference in cJSON_SetValuestring).
  * The call below gives later stages (reach) a path from main to that function. */
 #include <stdio.h>

@@ -3,10 +3,10 @@
   "@graph": [
     {
       "@id": "_:Build#CreationInfo",
-      "comment": "Hand-written to match the SPDX 3 file CMake's install(SBOM) generates. Test fixture.",
+      "comment": "Hand-written to match the SPDX 3 file CMake's install(SBOM) generates. Sample project.",
       "created": "2026-11-05T00:00:00Z",
       "createdBy": [
-        "urn:team45:test-fixture"
+        "urn:team45:sample-project"
       ],
       "specVersion": "3.0.1",
       "type": "CreationInfo"

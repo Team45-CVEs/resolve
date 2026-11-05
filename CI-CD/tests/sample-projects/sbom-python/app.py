@@ -1,4 +1,4 @@
-"""Test fixture: Python-only project. No CMake build, so no SBOM."""
+"""Sample project: Python-only project. No CMake build, so no SBOM."""
 import requests
 
 

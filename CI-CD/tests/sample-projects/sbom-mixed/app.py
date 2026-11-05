@@ -1,4 +1,4 @@
-"""Test fixture: Python code that calls the C++ module built from src/fastmath.cpp."""
+"""Sample project: Python code that calls the C++ module built from src/fastmath.cpp."""
 import fastmath
 
 

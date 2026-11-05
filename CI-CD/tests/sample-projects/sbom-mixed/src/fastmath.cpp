@@ -1,4 +1,4 @@
-// Test fixture: small C++ extension module called from Python.
+// Sample project: small C++ extension module called from Python.
 #include <pybind11/pybind11.h>
 
 int add(int a, int b) { return a + b; }

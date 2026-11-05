@@ -3,10 +3,10 @@
   "@graph": [
     {
       "@id": "_:Build#CreationInfo",
-      "comment": "Hand-written to match the SPDX 3 file CMake's install(SBOM) generates. Test fixture.",
+      "comment": "Hand-written to match the SPDX 3 file CMake's install(SBOM) generates. Sample project.",
       "created": "2026-11-05T00:00:00Z",
       "createdBy": [
-        "urn:team45:test-fixture"
+        "urn:team45:sample-project"
       ],
       "specVersion": "3.0.1",
       "type": "CreationInfo"
@@ -16,13 +16,13 @@
       "element": [
         {
           "creationInfo": "_:Build#CreationInfo",
-          "name": "cjson:davegamble::cjson",
-          "software_packageVersion": "1.7.17",
-          "spdxId": "urn:cjson::cjson#Package",
+          "name": "pybind11:pybind11::module",
+          "software_packageVersion": "2.13.6",
+          "spdxId": "urn:pybind11::module#Package",
           "type": "software_Package"
         }
       ],
-      "name": "vulnappTargets",
+      "name": "mixedappTargets",
       "profileConformance": [
         "core",
         "software"
@@ -30,23 +30,23 @@
       "rootElement": [
         {
           "creationInfo": "_:Build#CreationInfo",
-          "name": "vulnapp",
+          "name": "mixedapp",
           "software_primaryPurpose": "application",
-          "spdxId": "urn:vulnapp#Package",
+          "spdxId": "urn:mixedapp#Package",
           "type": "software_Package"
         }
       ],
-      "spdxId": "urn:vulnappTargets#SPDXDocument",
+      "spdxId": "urn:mixedappTargets#SPDXDocument",
       "type": "SpdxDocument"
     },
     {
       "creationInfo": "_:Build#CreationInfo",
       "description": "Linked Libraries",
-      "from": "urn:vulnapp#Package",
+      "from": "urn:mixedapp#Package",
       "relationshipType": "dependsOn",
       "spdxId": "urn:Static#Relationship",
       "to": [
-        "urn:cjson::cjson#Package"
+        "urn:pybind11::module#Package"
       ],
       "type": "Relationship"
     }
