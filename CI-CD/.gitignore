@@ -8,5 +8,5 @@ test-results/
 __pycache__/
 .pytest_cache/
 
-# Keep the fixture projects' build output, even if a parent .gitignore ignores dist/
-!tests/fixtures/**/dist/
+# Keep the sample projects' build output, even if a parent .gitignore ignores dist/
+!tests/sample-projects/**/dist/

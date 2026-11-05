@@ -26,7 +26,7 @@ from pathlib import Path
 
 # Shared CI helpers (logger.py, env.py) live in container-scripts next to this file.
 sys.path.insert(0, str(Path(__file__).resolve().parent / "container-scripts"))
-import env  # noqa: E402
+import ci_env as env  # noqa: E402
 import logger  # noqa: E402
 
 # --- TEMPORARY CONFIG -------------------------------------------------------
