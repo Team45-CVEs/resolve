@@ -1,8 +1,8 @@
 """Unit tests for ci_env.py.
- 
+
 ci_env hides the differences between GitHub Actions and GitLab CI behind
 neutral names. These tests check each part of that contract:
- 
+
     1. Platform detection      which CI system ci_env thinks it is running on
     2. Saved values            COMMIT_SHA, WORKSPACE, etc. read at import
     3. IS_DEBUG                debug logging switch
@@ -11,25 +11,27 @@ neutral names. These tests check each part of that contract:
     6. set_output() on GitHub  heredoc entries in the GITHUB_OUTPUT file
     7. set_output() on GitLab  KEY=value lines in a dotenv file
     8. set_output() locally    printed instead of written
- 
+
 Every test uses one of the github_env, gitlab_env or local_env fixtures from
 tests/conftest.py. They give the test a clean environment and reload ci_env,
 and test.set(NAME=value) changes a variable and reloads ci_env again.
 """
 
-import uuid
 from pathlib import Path
 
 import pytest
+
 import ci_env
 
 
 # Golden files the set_output() tests compare against.
 EXPECTED = Path(__file__).parent / "expected"
-EXPECTED_GITHUB_OUTPUT = EXPECTED / "github.txt"   # GITHUB_OUTPUT heredoc entries
-EXPECTED_GITLAB_OUTPUT = EXPECTED / "gitlab.env"   # GitLab dotenv lines
+EXPECTED_GITHUB_OUTPUT = EXPECTED / "github_output.txt"   # GITHUB_OUTPUT heredoc entries
+EXPECTED_GITLAB_OUTPUT = EXPECTED / "ci_outputs.env"      # GitLab dotenv lines
 
-
+# The delimiter set_output() writes on GitHub when uuid4() is pinned to the
+# all-zero UUID by the fixed_uuid fixture in tests/conftest.py.
+FIXED_DELIMITER = "EOF_" + "0" * 32
 
 # The contract: neutral name -> (GitHub variable, GitLab variable).
 # Written out here rather than read from ci_env._VARIABLES, so an accidental

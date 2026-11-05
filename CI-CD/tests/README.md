@@ -141,7 +141,7 @@ This mounts `tests/` read-only, installs pytest into the container only (the ima
         ├── requirements.txt        # pytest and test helpers, pinned
         ├── report.schema.json      # required structure of a report
         ├── test_contracts.py       # (planned) action.yml vs scripts
-        ├── fixtures/               # fake projects used as test input
+        ├── sample-projects/        # small fake C/C++ projects used as test input
         │   └── simple-build/
         │       ├── src/hello.c
         │       └── dist/hello.txt
@@ -160,20 +160,20 @@ This mounts `tests/` read-only, installs pytest into the container only (the ima
             └── expected/
 ```
 
-Each core module and each target script gets its own folder with its tests and an `expected/` folder of golden files: the exact output the tests compare against. Fixture projects stay in the shared `fixtures/` folder, because several scripts and the smoke test use the same ones.
+Each core module and each target script gets its own folder with its tests and an `expected/` folder of golden files: the exact output the tests compare against. Sample projects stay in the shared `sample-projects/` folder, because several scripts and the smoke test use the same ones.
 
-Note that `tests/fixtures/` holds **files** (fake projects), while pytest **fixtures** are setup functions. The names are similar but they're different things.
+In this README, a **sample project** is a small fake C/C++ project in `sample-projects/`, and a **fixture** always means a pytest fixture: a setup function from `conftest.py`. The folder isn't called `fixtures/` so the two don't get mixed up.
 
 ### Test data files
 
 | File or folder | What it is |
 | --- | --- |
-| `fixtures/` | Small fake projects used as test input. `simple-build` is a one-file C project with a tiny `dist/` build. Tests copy one into a temporary workspace with `fixture_project`, so they can change it freely. |
+| `sample-projects/` | Small fake C/C++ projects used as test input. `simple-build` is a one-file C project with a tiny `dist/` build. Tests copy one into a temporary workspace with the `sample_project` fixture, so they can change it freely. |
 | `<module>/expected/` | Golden files: the exact output one module or script should produce. When an output format changes on purpose, update its golden file in the same commit. |
 | `report.schema.json` | A JSON Schema of the fields every report must have. Tests validate reports against it, so a missing or misnamed field fails even when values differ. It starts with `metadata` (exactly what `ci_env.metadata()` returns) and an optional `findings` count; add each report's own fields as the scripts are written. Validating needs the `jsonschema` package; add it to `requirements.txt`, pinned, with the first test that uses it. |
 | `requirements.txt` | pytest and other test helpers, pinned to exact versions so results don't change when a new release comes out. |
 
-`CI-CD/.gitignore` keeps the fixtures' `dist/` folders in git even if the repo ignores `dist/` elsewhere.
+`CI-CD/.gitignore` keeps the sample projects' `dist/` folders in git even if the repo ignores `dist/` elsewhere.
 
 ## Shared fixtures in conftest.py
 
@@ -184,7 +184,8 @@ Note that `tests/fixtures/` holds **files** (fake projects), while pytest **fixt
 | `github_env` | A simulated GitHub Actions step |
 | `gitlab_env` | A simulated GitLab CI job |
 | `local_env` | A run outside CI, with every CI variable removed |
-| `fixture_project` | A function that copies a project from `tests/fixtures/` into the workspace |
+| `sample_project` | A function that copies a project from `tests/sample-projects/` into the workspace |
+| `fixed_uuid` | Makes `uuid.uuid4()` return the same value every time, for golden-file tests |
 
 ### github_env, gitlab_env and local_env
 
@@ -272,18 +273,31 @@ This applies to **target scripts as well as tests**. A script that does `from ci
 
 You don't need to call `importlib.reload(ci_env)` yourself; `.set()` does it.
 
-### fixture_project
+### sample_project
 
-Returns a function that copies a project from `tests/fixtures/<name>` into `tmp_path/workspace`, which is the same folder `github_env` and `gitlab_env` use as the workspace. Use them together and the project lands where the script expects it. The test gets its own copy, so it can change files freely.
+Returns a function that copies a project from `tests/sample-projects/<name>` into `tmp_path/workspace`, which is the same folder `github_env` and `gitlab_env` use as the workspace. Use them together and the project lands where the script expects it. The test gets its own copy, so it can change files freely.
 
 ```python
-def test_project_lands_in_workspace(github_env, fixture_project):
-    project = fixture_project("simple-build")
+def test_project_lands_in_workspace(github_env, sample_project):
+    project = sample_project("simple-build")
     assert project == github_env.workspace
     assert (github_env.workspace / "dist").is_dir()
 ```
 
-Asking for a project that doesn't exist raises a `ValueError` naming the fixtures folder.
+Asking for a project that doesn't exist raises a `ValueError` naming the sample-projects folder.
+
+### fixed_uuid
+
+`set_output()` on GitHub separates each value with a random delimiter (`EOF_` plus a random UUID), so the `GITHUB_OUTPUT` file is different on every run and can't be compared with a golden file. Asking for `fixed_uuid` makes `uuid.uuid4()` return the all-zero UUID for that test, so the delimiter is always `EOF_` followed by 32 zeros:
+
+```python
+def test_github_output_matches_golden_file(github_env, fixed_uuid):
+    ci_env.set_output("findings", 3)
+    expected = "findings<<EOF_" + "0" * 32 + "\n3\nEOF_" + "0" * 32 + "\n"
+    assert github_env.output_file.read_text(encoding="utf-8") == expected
+```
+
+It affects every `uuid.uuid4()` call during the test, not just `set_output()`'s, and is undone when the test ends. Use it only in tests that compare output exactly.
 
 ### pytest's built-in fixtures
 
@@ -310,10 +324,9 @@ tests/actionN/
 └── expected/
 ```
 
-A typical test copies a fixture project, sets the inputs, runs the script, and compares the result with a golden file. The example below is illustrative; replace `build_report.main()` with however your script is called:
+A typical test copies a sample project, sets the inputs, runs the script, and compares the result with a golden file. The example below is illustrative; replace `build_report.main()` with however your script is called:
 
 ```python
-import json
 from pathlib import Path
 
 import ci_env
@@ -322,15 +335,15 @@ import build_report
 EXPECTED = Path(__file__).parent / "expected"
 EXPECTED_REPORT = EXPECTED / "simple-build-report.json"
 
-def test_report_for_simple_build(github_env, fixture_project):
+def test_report_for_simple_build(github_env, sample_project):
     """The report for the simple-build project matches the golden file."""
-    fixture_project("simple-build")
+    sample_project("simple-build")
     github_env.set(INPUT_BUILD_PATH="dist")
 
     build_report.main()
 
-    actual = json.loads((github_env.workspace / "build-report.json").read_text(encoding="utf-8"))
-    assert actual == json.loads(EXPECTED_REPORT.read_text(encoding="utf-8"))
+    actual = (github_env.workspace / "build-report.json").read_text(encoding="utf-8")
+    assert actual == EXPECTED_REPORT.read_text(encoding="utf-8")
 ```
 
 Keep the paths to golden files as constants at the top of the test file, as above. When the report format changes on purpose, update the golden file in the same commit.
@@ -370,7 +383,7 @@ def test_parses_findings(monkeypatch):
 
 This only works if the script calls `subprocess.run(...)`. A script that does `from subprocess import run` keeps its own copy, and the fake never reaches it.
 
-Tests that run the real tool on a fixture project need the tool installed, so run them with `make test`.
+Tests that run the real tool on a sample project need the tool installed, so run them with `make test`.
 
 ### Document every test
 
@@ -380,7 +393,7 @@ Give each test a docstring saying what it checks and why, as in `ci_env/test_ci_
 
 - **No test may depend on a secret.** Pull requests from forks can't access secrets, so those tests would fail for outside contributors.
 - **Shared setup goes in a `conftest.py` fixture**, not copied between test files.
-- **Scripts must give the same output for the same input**, or golden-file comparisons can't work. Anything random, such as the delimiter `set_output()` uses on GitHub, has to be pinned in the test. `ci_env/test_ci_env.py` shows how with its `fixed_uuid` fixture.
+- **Scripts must give the same output for the same input**, or golden-file comparisons can't work. Anything random, such as the delimiter `set_output()` uses on GitHub, has to be pinned in the test. For `set_output()`, use the `fixed_uuid` fixture.
 - **Test dependencies are pinned** to exact versions in `requirements.txt`. To add one, add it there with its version, then run `make setup` again.
 - **Read `ci_env` values through the module**, in tests and scripts alike.
 

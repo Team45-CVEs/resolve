@@ -1,40 +1,40 @@
 """Shared fixtures for every test under tests/.
- 
+
 pytest loads this file automatically before running any test, and every
 fixture here is available to every test file without an import. Test files
 never import conftest.py directly.
- 
+
 Fixtures (see tests/README.md for examples):
-    fixture_project  copy a project from tests/fixtures/ into the workspace
+    sample_project   copy a project from tests/sample-projects/ into the workspace
     github_env       a simulated GitHub Actions step
     gitlab_env       a simulated GitLab CI job
     local_env        a run with no CI platform detected
- 
+    fixed_uuid       make uuid.uuid4() return the same value every time
+
 The three *_env fixtures remove every CI variable from the environment,
 set the ones their platform needs, and reload ci_env so its saved values
 match. When the test ends, every change is undone and ci_env is reloaded
 again, so nothing leaks into the next test.
- 
+
 ci_env saves its values when it is imported, so tests must read them as
 ci_env.COMMIT_SHA (through the module), never with
 "from ci_env import COMMIT_SHA", which would keep a stale copy.
 """
 
-import uuid
 import importlib
 import os
 import shutil
+import uuid
 from pathlib import Path
 
 import pytest
+
 import ci_env
 
 
-FIXTURES_DIR = Path(__file__).parent / "fixtures"
+# Small fake C/C++ projects used as test input (not pytest fixtures).
+SAMPLE_PROJECTS_DIR = Path(__file__).parent / "sample-projects"
 
-# The delimiter set_output() writes on GitHub when uuid4() is pinned to the
-# all-zero UUID by the fixed_uuid fixture below.
-FIXED_DELIMITER = "EOF_" + "0" * 32
 
 # Every variable ci_env reads. The platform variables come from ci_env's own
 # mapping, so a newly mapped variable is cleaned without editing this file.
@@ -43,7 +43,6 @@ _PLATFORM_VARIABLES = {
     for per_platform in ci_env._VARIABLES.values()
     for variable in per_platform.values()
 }
-
 _CONTROL_VARIABLES = {
     "GITHUB_ACTIONS",      # platform detection
     "GITLAB_CI",           # platform detection
@@ -109,17 +108,17 @@ def _make_workspace(tmp_path):
 
 
 @pytest.fixture
-def fixture_project(tmp_path):
-    """Return a function that copies tests/fixtures/<name> into the workspace.
+def sample_project(tmp_path):
+    """Return a function that copies tests/sample-projects/<name> into the workspace.
 
     The copy lands in tmp_path/workspace, the same folder github_env and
     gitlab_env use as the workspace, so a test can change it freely.
-    Usage: project = fixture_project("simple-build")
+    Usage: project = sample_project("simple-build")
     """
     def copy(name):
-        source = FIXTURES_DIR / name
+        source = SAMPLE_PROJECTS_DIR / name
         if not source.is_dir():
-            raise ValueError(f"No fixture project named {name!r} in {FIXTURES_DIR}")
+            raise ValueError(f"No sample project named {name!r} in {SAMPLE_PROJECTS_DIR}")
         destination = _make_workspace(tmp_path)
         shutil.copytree(source, destination, symlinks=True, dirs_exist_ok=True)
         return destination
@@ -183,10 +182,12 @@ def local_env(monkeypatch):
 
 @pytest.fixture
 def fixed_uuid(monkeypatch):
-    """Pin uuid.uuid4() to the all-zero UUID.
+    """Make uuid.uuid4() return the all-zero UUID for this test.
 
-    set_output() on GitHub uses a random delimiter, which would make the
-    output different on every run. Pinning it makes the output the same for
-    the same input, so it can be compared with a golden file.
+    set_output() on GitHub uses a random delimiter, so its output differs on
+    every run. Pinning uuid4() makes the output the same for the same input,
+    so it can be compared with a golden file. The delimiter becomes
+    "EOF_" followed by 32 zeros.
     """
     monkeypatch.setattr(uuid, "uuid4", lambda: uuid.UUID(int=0))
+    
