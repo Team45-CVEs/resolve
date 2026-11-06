@@ -1,0 +1,173 @@
+name: Input Synthesis
+description: >
+  Run RESOLVE input-synthesis against the checked-out repo, using the per-CVE
+  files the sbom action produced from that same repo. Runs inside the RESOLVE
+  runtime image (setup/Dockerfile); for each CVE it tries to synthesize and
+  verify a triggering input, writing one result directory per CVE.
+
+# Pairs with the sbom action in the SAME job: sbom writes <output-dir>/cves/*.json
+# to the workspace, then this action reads them off that shared disk. Nothing is
+# uploaded between the two; add your own upload-artifact step if you want the
+# results to outlive the runner.
+#
+# Usage (one job, after the sbom step):
+#   - uses: ./CI-CD/actions/sbom
+#     id: sbom
+#     with: { sbom-path: ..., llm-provider: claude, api-key: ${{ secrets.ANTHROPIC_API_KEY }} }
+#   - uses: ./CI-CD/actions/input-synthesis
+#     with:
+#       cves-dir: ${{ steps.sbom.outputs.vulnerabilities-path && 'sbom-out/cves' }}
+#       agent: claude
+#       api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+inputs:
+  cves-dir:
+    description: "Directory of per-CVE json files to process (sbom output-dir + /cves)."
+    default: "sbom-out/cves"
+  output-dir:
+    description: "Where per-CVE result dirs are written, relative to the workspace."
+    default: "synthesis-out"
+  agent:
+    description: "Coding-agent backend: claude | codex | opencode."
+    default: "claude"
+  api-key:
+    description: >
+      API key for the agent. Required for claude (ANTHROPIC) and codex (OPENAI);
+      ignored for opencode. If empty, the matching *_API_KEY must already be in
+      the environment.
+    default: ""
+  model:
+    description: "Optional --model override passed through to the agent CLI."
+    default: ""
+  mode:
+    description: >
+      synthesize = standalone (assumes the target is present/built in target-dir);
+      run-all    = full pipeline (setup checks out & builds the affected version
+      from the CVE itself, then improve-CVE + reachability + synthesize).
+    default: "synthesize"
+  target-dir:
+    description: >
+      Subdirectory of the checked-out repo to treat as the target, relative to
+      the workspace. Default '.' = the repo root, i.e. the same repo the sbom
+      action scanned. Set this only if the vulnerable code lives in a subfolder.
+      Note: analysis reads the source as-is, but verifying a synthesized crash
+      needs a built target -- the agent builds it per AGENTS.md/CLAUDE.md if
+      needed, or use mode: run-all so `setup` builds it first.
+    default: "."
+  image:
+    description: >
+      Prebuilt RESOLVE image to reuse. If empty, builds setup/Dockerfile with
+      AI_BACKEND=<agent>. Pass a tag you built once earlier in the job to avoid
+      rebuilding.
+    default: ""
+
+outputs:
+  synthesis-dir:
+    description: "Directory containing per-CVE result subdirectories."
+    value: ${{ steps.synthesize.outputs.synthesis-dir }}
+  cve-count:
+    description: "Number of CVE files processed."
+    value: ${{ steps.synthesize.outputs.cve-count }}
+  failed-count:
+    description: "Number of CVEs whose synthesis stage exited non-zero."
+    value: ${{ steps.synthesize.outputs.failed-count }}
+
+runs:
+  using: composite
+  steps:
+    # --- resolve the image (build once if not provided) ---------------------
+    - name: Resolve RESOLVE runtime image
+      id: image
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        AGENT: ${{ inputs.agent }}
+      run: |
+        set -euo pipefail
+        if [ -z "$IMAGE" ]; then
+          repo_root=$(realpath "$GITHUB_ACTION_PATH/../../..")
+          IMAGE="resolve-input-synthesis:$AGENT"
+          docker build --build-arg AI_BACKEND="$AGENT" -t "$IMAGE" \
+            -f "$repo_root/setup/Dockerfile" "$repo_root/setup"
+        fi
+        echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+    # --- run synthesis once per CVE ----------------------------------------
+    - name: Synthesize inputs
+      id: synthesize
+      shell: bash
+      env:
+        IMAGE: ${{ steps.image.outputs.image }}
+        CVES_DIR: ${{ inputs.cves-dir }}
+        OUTPUT_DIR: ${{ inputs.output-dir }}
+        AGENT: ${{ inputs.agent }}
+        API_KEY: ${{ inputs.api-key }}
+        MODEL: ${{ inputs.model }}
+        MODE: ${{ inputs.mode }}
+        TARGET_DIR: ${{ inputs.target-dir }}
+      run: |
+        set -euo pipefail
+        repo_root=$(realpath "$GITHUB_ACTION_PATH/../../..")
+
+        # mode -> python module (both share the CLI shape: agent cve out [--overwrite] [--model])
+        case "$MODE" in
+          synthesize) module="resolve.input_synthesis.synthesize" ;;
+          run-all)    module="resolve.input_synthesis.run_all" ;;
+          *) echo "unknown mode: $MODE (use synthesize | run-all)" >&2; exit 1 ;;
+        esac
+
+        # agent -> the env var its CLI reads for auth
+        case "$AGENT" in
+          claude)   key_var=ANTHROPIC_API_KEY ;;
+          codex)    key_var=OPENAI_API_KEY ;;
+          opencode) key_var=OPENCODE_API_KEY ;;
+          *) echo "unknown agent: $AGENT" >&2; exit 1 ;;
+        esac
+        # Prefer an explicit api-key input; else inherit whatever is already set.
+        if [ -n "$API_KEY" ]; then export "$key_var=$API_KEY"; fi
+
+        model_flag=""
+        [ -n "$MODEL" ] && model_flag="--model $MODEL"
+
+        if [ ! -d "$CVES_DIR" ]; then
+          echo "cves-dir not found: $CVES_DIR" >&2; exit 1
+        fi
+
+        mkdir -p "$OUTPUT_DIR"
+        count=0
+        failed=0
+
+        shopt -s nullglob
+        for cve_file in "$CVES_DIR"/*.json; do
+          count=$((count + 1))
+          cve_id="$(basename "$cve_file" .json)"
+          echo "::group::input synthesis: $cve_id ($MODE)"
+
+          # PYTHONPATH=/resolve/... runs this repo's working-tree code instead
+          # of the release pinned in the image (same trick the sbom action uses).
+          # -w sets the target working dir the synthesize stage operates on.
+          if docker run --rm \
+              -v "$GITHUB_WORKSPACE:/work" \
+              -w "/work/$TARGET_DIR" \
+              -v "$repo_root:/resolve:ro" \
+              -e PYTHONPATH=/resolve/resolve-cli/src \
+              -e "$key_var" \
+              "$IMAGE" \
+              /opt/resolve/bin/python3 -m "$module" \
+                "$AGENT" "/work/$cve_file" "/work/$OUTPUT_DIR/$cve_id" --overwrite $model_flag
+          then
+            echo "ok: $cve_id"
+          else
+            failed=$((failed + 1))
+            echo "FAILED: $cve_id (continuing)"
+          fi
+          echo "::endgroup::"
+        done
+
+        {
+          echo "synthesis-dir=$OUTPUT_DIR"
+          echo "cve-count=$count"
+          echo "failed-count=$failed"
+        } >> "$GITHUB_OUTPUT"
+
+        echo "Processed $count CVE(s); $failed failed." >> "$GITHUB_STEP_SUMMARY"
