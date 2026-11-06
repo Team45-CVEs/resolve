@@ -2,3 +2,4 @@
 # image job and make test; never part of the action image itself.
 # Pinned to exact versions so results don't change when a new release comes out.
 pytest==8.3.4
+pyyaml==6.0.2
