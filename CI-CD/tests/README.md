@@ -298,7 +298,6 @@ Give each test a docstring saying what it checks and why, as in `ci_env/test_ci_
 
 ## Rules
 
-- **No test may depend on a secret.** Pull requests from forks can't access secrets, so those tests would fail for outside contributors.
 - **Shared setup goes in a `conftest.py` fixture**, not copied between test files.
 - **Scripts must give the same output for the same input**, or golden-file comparisons can't work. Anything random, such as the delimiter `set_output()` uses on GitHub, has to be pinned in the test. For `set_output()`, use the `fixed_uuid` fixture.
 - **Test dependencies are pinned** to exact versions in `requirements.txt`. To add one, add it there with its version.
@@ -308,9 +307,6 @@ Give each test a docstring saying what it checks and why, as in `ci_env/test_ci_
 
 **`AttributeError: module 'ci_env' has no attribute '_VARIABLES'`**
 pytest couldn't find `ci_env.py`. Because `tests/ci_env/` is a folder with the same name, Python imports that folder as an empty package instead, and the error doesn't mention the real cause. Check that you're running pytest from `tests/`, and in the container, that the image has the scripts at `/action/scripts/`.
-
-**`SyntaxError` when importing `ci_env`**
-Your Python is older than 3.12. The `get_input()` line in `ci_env.py` reuses double quotes inside an f-string, which only 3.12 and newer accept. Use Python 3.12+, or change the inner quotes to single quotes and any Python 3 will work.
 
 **`error: externally-managed-environment` from pip**
 The Python was installed by the operating system (`apt`), which blocks system-wide installs. In the test container, add `--break-system-packages` to the `pip install`; that's safe there because it only changes the throwaway container.
