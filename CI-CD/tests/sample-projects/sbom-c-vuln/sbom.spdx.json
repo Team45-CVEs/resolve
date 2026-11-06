@@ -1,0 +1,54 @@
+{
+  "@context": "https://spdx.org/rdf/3.0.1/spdx-context.jsonld",
+  "@graph": [
+    {
+      "@id": "_:Build#CreationInfo",
+      "comment": "Hand-written to match the SPDX 3 file CMake's install(SBOM) generates. Sample project.",
+      "created": "2026-11-05T00:00:00Z",
+      "createdBy": [
+        "urn:team45:sample-project"
+      ],
+      "specVersion": "3.0.1",
+      "type": "CreationInfo"
+    },
+    {
+      "creationInfo": "_:Build#CreationInfo",
+      "element": [
+        {
+          "creationInfo": "_:Build#CreationInfo",
+          "name": "cjson:davegamble::cjson",
+          "software_packageVersion": "1.7.17",
+          "spdxId": "urn:cjson::cjson#Package",
+          "type": "software_Package"
+        }
+      ],
+      "name": "vulnappTargets",
+      "profileConformance": [
+        "core",
+        "software"
+      ],
+      "rootElement": [
+        {
+          "creationInfo": "_:Build#CreationInfo",
+          "name": "vulnapp",
+          "software_primaryPurpose": "application",
+          "spdxId": "urn:vulnapp#Package",
+          "type": "software_Package"
+        }
+      ],
+      "spdxId": "urn:vulnappTargets#SPDXDocument",
+      "type": "SpdxDocument"
+    },
+    {
+      "creationInfo": "_:Build#CreationInfo",
+      "description": "Linked Libraries",
+      "from": "urn:vulnapp#Package",
+      "relationshipType": "dependsOn",
+      "spdxId": "urn:Static#Relationship",
+      "to": [
+        "urn:cjson::cjson#Package"
+      ],
+      "type": "Relationship"
+    }
+  ]
+}
