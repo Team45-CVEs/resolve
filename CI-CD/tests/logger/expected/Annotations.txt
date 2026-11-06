@@ -1,0 +1,8 @@
+Starting build report
+::debug::Build path: dist
+::group::Findings
+::warning file=src/app.py,line=12::Coverage is low
+::error file=src/main.c,line=10,col=5,endLine=12,endColumn=8,title=cppcheck%3A nullPointer::Possible null dereference
+::notice::2 findings in 1 file
+::endgroup::
+Report written to build-report.json
